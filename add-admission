@@ -1,0 +1,1007 @@
+<?php 
+include_once('includes/config.php');
+$Admin = new admins;
+
+error_reporting(E_ALL);
+ini_set("display_errors", 1);
+
+function customErrorHandling($errno, $errstr, $errfile, $errline)
+{
+	echo "Error: [$errno] $errstr - $errfile:$errline";
+}
+
+set_error_handler("customErrorHandling");
+
+$db = new DB();
+$conn = $db->getConnection(); 
+if($_SESSION['auth']['login_as']=="franchise")
+{ 
+	$franchise = $_SESSION['auth']['id']; 
+	$alloted_courses = $_SESSION['auth']['courses_alloted'];
+}
+else{ 
+	$franchise = $_SESSION['auth']['franchise_id'];
+	$allcorse = $Admin->select($Admin->franchises,'',"id=".$franchise);
+	$alloted_courses = $allcorse[0]['courses_alloted'];
+}
+$MAIL = $Admin->select($Admin->email_templates,'',"franchise_id=".$franchise);
+  
+if(isset($_POST['add_old']))
+{
+	// print_r("Avinash");exit;
+	if(isset($_POST['franchise_course_id']) && isset($_POST['course1']) || isset($_POST['franchise_course_id']) && isset($_POST['module1']))
+	{
+		$_SESSION['auth']['error'] = "You can not select Modules and Course Together";
+		header("Location:".$_SERVER['HTTP_REFERER']."");
+		exit;
+	}
+	$_POST['student_code'] = $_GET['student_code'];
+	$_POST['franchise_id'] = $franchise;
+	$_POST['franchise_staff_id'] = ($_POST['franchise_staff_id']=="")?$_SESSION['auth']['id']:$_POST['franchise_staff_id'];  
+	$_POST['franchise_course_id'] = (empty($_POST['franchise_course_id']))?0:implode(", ",$_POST['franchise_course_id']);
+	$_POST['course_id'] = (empty($_POST['course1']))?0:implode(", ",$_POST['course1']);
+	$_POST['module_id'] = (empty($_POST['module1']))?0:implode(", ",$_POST['module1']);
+
+	$query = $Admin->save($Admin->admissions,$_POST);
+	if($query)
+	{
+		// print_r("Mayur");exit;
+		$AID = mysqli_insert_id($conn);
+		if(isset($_GET['enquiry_id']))
+		{
+		$field = array("status" => "Admitted");
+		$Admin->save($Admin->enquiries,$field,"id=".$_GET['enquiry_id']);
+		}
+		
+		$_POST['admission_id'] = $AID;
+		$_POST['date_of_payment'] = $_POST['admission_date'];
+		$Admin->save($Admin->admission_payments,$_POST);
+		$ID = mysqli_insert_id($conn);
+		
+		$s=0;
+		foreach($_POST['installment_date1'] as $installmentDate)
+		{
+			$_POST['installment_date'] = $installmentDate;
+			$_POST['installment_amount'] = $_POST['installment_amount1'][$s];
+			$Admin->save('admission_installment_plans',$_POST);
+			$s++;
+		}
+		
+		// $to =   $_POST['email'];
+		// $from = $MAIL[0]['sender'];  // change e-mail adress
+		// $name = $MAIL[0]['name'];
+		// $subject = $MAIL[0]['subject'];
+
+		$message = '
+		<html>
+		<head>
+		<title></title>
+		<body>
+		<div style="width:100%; background:#eee;font-family:verdana; font-size:14px;">
+		<div style="width:99%; padding:10px; background:#D41B29; font-size:16px"><span style="font-size:24px;color:#fff;">'.$allcorse[0]['fr_name'].'</span>
+		</div>
+		<div style="width:80%; margin:0 auto; background:#fff; text-align:left; padding:20px;line-height:28px; border:1px dashed red; border-top:none; border-radius:0 0 15px 15px;-webkit-border-radius:0 0 15px 15px; ">'.$MAIL[0]['content'].'</div>
+		<div style="clear:both"></div>
+		</div>
+		</body>
+		</html>';
+
+		// $headere  = "MIME-Version: 1.0\r\n";
+		// $headere .= "Content-type: text/html; charset=iso-8859-1\r\n";
+		// $headere .= "From: ".$name." <".$from.">\r\n";
+		// $headere .= "Bcc: ".$bcc."\r\n";
+		// //print_r($message);exit;
+		// mail($to, $subject, $message, $headere);		
+				
+		$_SESSION['Auth']['success'] = "New Admission has been added successfully";
+		header("Location:print-admission-cash-receipt.php?pid=".$ID."");
+		exit;
+	}
+} 
+elseif(isset($_POST['add']))
+{
+	// print_r("Rahul");
+	if(isset($_POST['franchise_course_id']) && isset($_POST['course1']) || isset($_POST['franchise_course_id']) && isset($_POST['module1']))
+	{
+		// print_r("Rahul2");exit;
+		$_SESSION['auth']['error'] = "You can not select Modules and Course Together";
+		header("Location:".$_SERVER['HTTP_REFERER']."");
+		exit;
+	}
+
+	$chkDuplicate = $Admin->select($Admin->students,'',"email='".$_POST['email']."' OR mobile=".$_POST['mobile']."");
+	if(count($chkDuplicate) > 0)
+	{
+		echo "<script>alert('This Student is already in database.');</script>";
+		$_SESSION['auth']['error'] = "This Student is already in database.";
+		header("Location:add-admission.php");
+		exit;
+	}
+
+	$_POST['franchise_id'] = $franchise;
+	$std = $Admin->select($Admin->students,'',"franchise_id=".$franchise." ORDER BY id DESC");
+	$student_code = $std[0]['id']+1;
+	$_POST['student_code'] = "STD00".$student_code;
+
+	// echo ;exit;
+	$_POST['name'] = ucwords(strtolower($_POST['name']));
+	$_POST['email'] = strtolower($_POST['email']);
+	$_POST['address'] = ucwords(strtolower($_POST['address']));
+	$_POST['city'] = ucwords(strtolower($_POST['city']));
+
+	$addQuery = $Admin->save($Admin->students,$_POST);
+
+
+	
+	// print_r($addQuery);
+
+	$_POST['student_id'] = mysqli_insert_id($conn);
+	$_POST['franchise_id'] = $franchise;
+	$_POST['franchise_staff_id'] = ($_POST['franchise_staff_id']=="")?$_SESSION['auth']['id']:$_POST['franchise_staff_id'];  
+	$_POST['franchise_course_id'] = (empty($_POST['franchise_course_id']))?0:implode(", ",$_POST['franchise_course_id']);
+	$_POST['course_id'] = (empty($_POST['course1']))?0:implode(", ",$_POST['course1']);
+	$_POST['module_id'] = (empty($_POST['module1']))?0:implode(", ",$_POST['module1']);
+	$query = $Admin->save($Admin->admissions,$_POST);
+	$AID = $query;
+	if($query)
+	{
+		if(isset($_GET['enquiry_id']))
+		{
+			$field = array("status" => "Admitted");
+			$Admin->save($Admin->enquiries,$field,"id=".$_GET['enquiry_id']);
+		}		
+		$_POST['admission_id'] = $AID;
+		$_POST['date_of_payment'] = $_POST['admission_date'];
+	
+		$paid_fees = $_POST['paid_fees'];
+		$balance_fees = $_POST['balance_fees'];
+		$cheque_amount = $_POST['cheque_amount'];
+		$franchise_staff_id = $_POST['franchise_staff_id'];
+		$admission_id = $_POST['admission_id'];
+
+		$mode_of_payment = $conn->real_escape_string($_POST['mode_of_payment']);
+		$cheque_no = $conn->real_escape_string($_POST['cheque_no']);
+		$bank_name = $conn->real_escape_string($_POST['bank_name']);
+		$txn_no = $conn->real_escape_string($_POST['txn_no']);
+		$next_installment_date = $conn->real_escape_string($_POST['next_installment_date']);
+		$payment_taken_by = $conn->real_escape_string($_POST['payment_taken_by']);
+		$date_of_payment = $conn->real_escape_string($_POST['date_of_payment']);
+		$sql1 = "select max(receipt_no)+1 as receipt_no from admission_payments where admission_id in (select id from admissions where franchise_id = ".$franchise.")";
+		$row = mysqli_fetch_assoc(mysqli_query($conn , $sql1));
+		$receipt_no = $row['receipt_no'];
+
+		if(empty(trim($cheque_amount))){
+			$cheque_amount = 0;
+		}
+
+		$sql = "INSERT INTO admission_payments 
+		(paid_fees, balance_fees, mode_of_payment, cheque_no, bank_name, cheque_amount, txn_no, 
+		next_installment_date, payment_taken_by, franchise_staff_id, admission_id, date_of_payment,balance , receipt_no, created , modified) 
+		VALUES ($paid_fees, $balance_fees, '$mode_of_payment', '$cheque_no', '$bank_name', 
+		$cheque_amount, '$txn_no', '$next_installment_date', '$payment_taken_by', 
+		$franchise_staff_id, $admission_id, '$date_of_payment' ,default, $receipt_no, NOW() , NOW())";
+		
+		mysqli_query($conn , $sql);
+
+		$result = $Admin->select($Admin->admission_payments, "", "admission_id = ". $AID, "id DESC");
+    	// print_r($result[0]['id']);exit;
+
+		$ID = $result[0]['id'];
+		// print_r($ID);exit;
+		$s=0;
+		foreach($_POST['installment_date1'] as $installmentDate)
+		{
+			$_POST['installment_date'] = $installmentDate;
+			$_POST['installment_amount'] = $_POST['installment_amount1'][$s];
+			$Admin->save('admission_installment_plans',$_POST);
+			$s++;
+		}
+	// $message = '
+	// <html>
+	// <head>
+	// <title></title>
+	// <body>
+	// <div style="width:100%; background:#eee;font-family:verdana; font-size:14px;">
+	// <div style="width:99%; padding:10px; background:#D41B29; font-size:16px"><span style="font-size:24px;color:#fff;">'.$allcorse[0]['fr_name'].'</span>
+	// </div>
+	// <div style="width:80%; margin:0 auto; background:#fff; text-align:left; padding:20px;line-height:28px; border:1px dashed red; border-top:none; border-radius:0 0 15px 15px;-webkit-border-radius:0 0 15px 15px; ">'.$MAIL[0]['content'].'</div>
+	// <div style="clear:both"></div>
+	// </div>
+	// </body>
+	// </html>';
+
+	// $headere  = "MIME-Version: 1.0\r\n";
+	// $headere .= "Content-type: text/html; charset=iso-8859-1\r\n";
+	// $headere .= "From: ".$name." <".$from.">\r\n";
+	// $headere .= "Bcc: ".$bcc."\r\n";
+	// //print_r($message);exit;
+	// mail($to, $subject, $message, $headere);
+	// $result = $Admin->select($Admin->admissions, "", "", "ORDER BY id DESC LIMIT 1");
+	$_SESSION['Auth']['success'] = "New Admission has been added successfully";
+	header("Location:print-admission-cash-receipt.php?pid=".$ID."");
+	exit;
+	}else{
+		print_r("No data found");exit;
+	}
+}
+elseif(isset($_GET['enquiry_id']))
+{
+	$result = $Admin->select($Admin->enquiries,'',"id=".$_GET['enquiry_id']);
+	$row = $result[0];
+}
+elseif(isset($_GET['student_code']))
+{
+	$result = $Admin->select($Admin->students,'',"student_code='".$_GET['student_code']."' AND franchise_id=".$franchise);
+	$row = $result[0];
+}
+?>
+<?php include_once('admin_left_panel.php'); ?> 
+<script>
+function checkEmail() {
+	var email = document.getElementById('email');
+	var filter = /^([a-zA-Z0-9_\.\-])+\@(([a-zA-Z0-9\-])+\.)+([a-zA-Z0-9]{2,4})+$/;
+	if (!filter.test(email.value)) {
+	return false;
+	}
+} 
+
+function submits()
+{
+	var name=$('#name').val();
+	var email = $('#email').val();
+	var mobile= $('#mobile').val();
+	var gender1 = $('#gender1');
+	var gender2 = $('#gender2');
+	var address = $('#address').val();
+	var city = $('#city').val();
+	var enquiry = $('').val();
+	var age = $('#age').val();
+	var education = $('#education').val();
+    var fees= parseFloat($('#fees').val());
+	var paid = parseFloat($('#paid').val());
+	var balance = parseFloat($('#balance').val());
+	var next_inst = $('#from').val();
+	var payment_taken = $('#payment_taken_by').val();
+	var date = $('#date').val();
+	var join_date = $('#to').val();
+    var error=0;
+	
+	//alert("Fees:"+fees+", Paid:"+paid);
+	
+	var instamt = 0;
+	$.each($("input[name='installment_amount1[]']"), function(){            
+		instamt = instamt+parseInt($(this).val());
+	});
+	
+	if(name == "" || !isNaN(name))
+	{
+	  $('#name_error').text("Please enter Name");
+	  error++;
+	}else
+	{
+	  $('#name_error').text("");
+	}
+	if(email == "" || checkEmail == false)
+	{
+	  $('#email_error').text("Please enter valid Email");
+	  error++;
+	}else
+	{
+	  $('#email_error').text("");
+	}
+	if(mobile == "" || isNaN(mobile) || mobile.length > 10)
+	{
+	  $('#mobile_error').text("Please enter valid Mobile No. Only Numbers");
+	  error++;
+	}else
+	{
+	  $('#mobile_error').text("");
+	}
+	
+	if(!gender1.is(":checked") && !gender2.is(":checked"))
+	{
+	  $('#gender_error').text("Please select Gender");
+	  error++;
+	}else
+	{
+	  $('#gender_error').text("");
+	}
+	
+	if(address == "")
+	{
+	  $('#address_error').text("Please enter Address");
+	  error++;
+	}else
+	{
+	  $('#address_error').text("");
+	}
+	
+	if(city == "")
+	{
+	  $('#city_error').text("Please enter City");
+	  error++;
+	}else
+	{
+	  $('#city_error').text("");
+	}
+
+	if(city == "")
+	{
+	  $('#city_error').text("Please enter City");
+	  error++;
+	}else
+	{
+	  $('#city_error').text("");
+	}
+
+	if(fees == "" || isNaN(fees))
+	{
+	  $('#fees_error').text("Please enter Total Fees");
+	  error++;
+	}else
+	{
+	  $('#fees_error').text("");
+	}
+	
+	if((balance != "" && balance != 0) && instamt == 0)
+	{
+	  	$('#installment_error').text("Please add installment plans.");
+	  	error++;
+	}else if(instamt != 0 && instamt != balance)
+	{
+	  	$('#installment_error').text("The predicted installment amount sum is not equal to Balance fees. Please adjust it correctly.");
+	  	error++;
+	}else
+	{
+	  	$('#installment_error').text("");
+	}
+	
+	if(paid == "" || isNaN(paid))
+	{
+	  $('#paid_error').text("Please enter valid Paid Fees");
+	  error++;
+	}else if( paid != "" && paid > fees)
+	{
+	  $('#paid_error').text("Paid Fees is greater than total Fees.");
+	  error++;
+	}else
+	{
+	  $('#paid_error').text("");
+	}
+	
+	if(balance != 0 && next_inst == "")
+	{
+	  $('#from_error').text("Please select Next Installment Date");
+	  error++;
+	}else
+	{
+	  $('#from_error').text("");
+	}
+	if(date == "")
+	{
+	  $('#date_error').text("Please enter Admission Date");
+	  error++;
+	}else
+	{
+	  $('#date_error').text("");
+	}
+	
+	if(payment_taken == '')
+	{
+	  $('#payment_taken_by_error').text("Please enter Payment Taken By");
+	  error++;
+	}else
+	{
+	  $('#payment_taken_by_error').text("");
+	}
+	if(join_date == "")
+	{
+	  $('#date_of_join_error').text("Please enter Date of Join");
+	  error++;
+	}else
+	{
+	  $('#date_of_join_error').text("");
+	}
+	
+	if(error==0)
+		return true;
+	else
+		return false;
+ }
+ 
+ function calc(paid)
+ {
+	 $('#balance').val( $('#fees').val()-paid );
+ }
+ 
+ function ShowWorking(ans)
+{
+	if(ans=='yes')
+		$('#workingDiv').fadeIn();
+	else
+	  	$('#workingDiv').fadeOut();
+}
+
+function SwitchDiv(mode)
+{
+	if(mode=='cheque')
+	{
+		$('#chequeDiv').show('slow');
+		$('#txnDiv').hide('slow');
+	}else if(mode=='online'){
+		$('#chequeDiv').hide('slow');
+		$('#txnDiv').show('slow');
+	}else{
+		$('#chequeDiv').hide('slow');
+		$('#txnDiv').hide('slow');
+	}
+}
+
+function GetStudentDetails(stud_code)
+{
+	window.location='add-admission.php?student_code='+stud_code;
+}
+
+$(function(){
+ //$(window).load(function(){
+  if( $('#working1').is(':checked'))
+  {
+    $('#workingDiv').show();
+  }
+ //});
+});
+
+function AddRow()
+{
+	var i=0;
+	var cnt = parseInt($('.trcount').size());
+	var ncnt = cnt+1;
+	var data = '<tr class="trcount" id="trcnt'+ncnt+'"><td width="44%"><input class="form-control datepicker" name="installment_date1[]" placeholder="YYYY-MM-DD" /></td><td width="44%"><input class="form-control" name="installment_amount1[]" /></td><td align="center" width="10%"><button type="button" class="btn btn-danger" onClick="DelRow('+ncnt+');"><i class="fa fa-minus-square fa-1x"></i></button></td></tr>';
+	$(data).appendTo('#instTable');
+}
+
+function DelRow(id)
+{
+	$('#trcnt'+id).remove();
+}
+
+$(function(){
+		   
+	$('#fees').keyup(function(){
+		$('#balance').val($(this).val());
+	});
+	
+	
+	$(".dataCourse").click(function(){
+		var total_amount = ($('#fees').val()!='')?$('#fees').val():0;
+		var paid_fees = ($('#paid').val()!='')?$('#paid').val():0;
+		var balance = ($('#balance').val()!='')?$('#balance').val():0;
+		if($(this).is(':checked'))
+		{
+			$('#fees').val(parseFloat(total_amount)+parseFloat($(this).data('value')));
+			$('#balance').val(parseFloat($('#fees').val())-parseFloat(paid_fees));
+		}else{
+			if(total_amount != '')
+			{
+				$('#fees').val(parseFloat(total_amount)-parseFloat($(this).data('value')));
+				$('#balance').val(parseFloat($('#fees').val())-parseFloat(paid_fees));
+			}
+		}
+	});
+	
+	$('#getInstallmentPlans').click(function(){
+		var amount = $('#balance').val(), count = $('#installmentNo').val();
+		if(amount == "")
+		{
+			$('#installment_error').text('Please enter fees first.'); return false;
+		}else{
+			$('#installment_error').text('');
+		}
+		if(count == "")
+		{
+			$('#installment_error').text('Please enter no. of installments.'); return false;
+		}else{
+			$('#installment_error').text('');
+		}
+		
+		$.post('ajax_process.php',{amount:amount, count: count, action:'installment-plans'},function(response){
+			$('#instTable').html(response);
+			$('.datepicker').datepicker({dateFormat:'yy-mm-dd',changeMonth:true,changeYear:true,minDate:0 });
+		});
+	
+	});
+});
+
+</script>
+<div id="page-wrapper" >
+<div id="page-inner">
+<div class="row">
+<div class="col-md-12" style="display: flex; justify-content: space-between; align-items: center;">
+<h2>New Admission </h2>   
+<p style="margin: 0;">
+	<button class="btn" onclick="history.back()" style="background-color: #f44336; color: white; border: none; cursor: pointer; border-radius: 5px; transition: 0.3s;">← Back</button>
+</p>
+</div>
+</div>              
+  
+<div class="row">
+<div class="col-md-7">
+<div class="panel panel-default">
+<div class="panel-heading">
+New Admission
+</div>
+<div class="panel-body">
+<form action="" enctype="multipart/form-data" method="post" onsubmit="return(submits());" >
+
+<div class="form-group">
+<label>Title</label>
+<select class="form-control" name="title" id="title">
+<option value="Mr" <?php if(isset($row['title']) && $row['title']=='Mr') { echo "selected='selected'"; } ?>>Mr</option>
+<option value="Mrs" <?php if(isset($row['title']) && $row['title']=='Mrs') { echo "selected='selected'"; } ?>>Mrs</option>
+<option value="Ms" <?php if(isset($row['title']) && $row['title']=='Ms') { echo "selected='selected'"; } ?>>Ms</option>
+</select>
+<span id="title_error" class="JError"></span>
+</div>
+
+<?php if(!isset($_GET['enquiry_id'])) { ?>
+<div class="form-group">
+<label>Name <span class="mandatory">*</span></label>
+<select class="form-control" onChange="GetStudentDetails(this.value);" >
+<option value="" > -- Select Student Name -- </option>
+<?php $fr_stud = $Admin->select($Admin->students,'',"franchise_id=".$franchise." ORDER BY name ASC");
+foreach($fr_stud as $fr_stud1) { ?>
+<!-- <option value=" -->
+<?php 
+// echo $fr_stud1['student_code']; 
+?>
+<!-- " >  -->
+<?php 
+// echo ucwords(strtolower(echo $fr_stud1['name']))." - ".$fr_stud1['mobile']; 
+?> 
+<!-- </option> -->
+<option value="
+<?php 
+echo $fr_stud1['student_code']; ?>" > 
+<?php 
+echo $fr_stud1['name']." - ".$fr_stud1['mobile'];
+?>
+</option>
+<?php } ?>
+</select>
+<span id="name_error" class="JError"></span>
+</div>
+
+<h3>OR</h3>
+<?php } ?>
+
+<!-- <div class="form-group">
+<label>Name <span class="mandatory">*</span></label>
+<input class="form-control" name="name" id="name" value="
+<?php 
+// echo isset($row['name'])?$row['name']: ''; 
+?>" />
+<span id="name_error" class="JError"></span>
+</div> -->
+
+<div class="form-group">
+    <label>Name <span class="mandatory">*</span></label>
+    <input class="form-control" name="name" id="name" value="<?php echo isset($row['name'])?$row['name'] : ''; ?>" />
+    <span id="name_error" class="JError"></span>
+</div>
+
+
+<div class="form-group">
+<label>Email <span class="mandatory">*</span></label>
+<input class="form-control" name="email" id="email" value="<?php echo isset($row['email'])?$row['email']:''; ?>" />
+<span id="email_error" class="JError"></span>
+</div>
+
+<div class="form-group">
+<label>Mobile <span class="mandatory">*</span></label>
+<input class="form-control" maxlength="10" name="mobile" id="mobile" value="<?php echo isset($row['mobile'])?$row['mobile']:''; ?>" />
+<span id="mobile_error" class="JError"></span>
+</div>
+
+<div class="form-group">
+<label>Alternate Mobile</label>
+<input class="form-control" maxlength="10" name="alternate_mobile" id="alternate_mobile" value="" />
+</div>
+
+<div class="form-group">
+<label>Gender <span class="mandatory">*</span></label>
+<div class="radio">
+<label>
+<input type="radio" name="gender" <?php if((isset($_GET['enquiry_id']) || isset($_GET['student_code'])) && $row['gender']=='Male') echo "checked=''"; ?> id="gender1" value="Male" />Male</label></div>
+<div class="radio">
+<label><input type="radio" <?php if((isset($_GET['enquiry_id']) || isset($_GET['student_code'])) && $row['gender']=='Female') echo "checked=''"; ?> name="gender" id="gender2" value="Female" />Female</label>
+</div>
+<span id="gender_error" class="JError"></span>
+</div>
+
+<div class="form-group">
+<label>Address <span class="mandatory">*</span></label>
+<textarea class="form-control" name="address" id="address" ><?php echo isset($row['address'])?$row['address']:''; ?></textarea>
+<span id="address_error" class="JError"></span>
+</div>
+
+<div class="form-group">
+<label>City <span class="mandatory">*</span></label>
+<input class="form-control" name="city" id="city" value="<?php echo isset($row['city'])?$row['city']:'Nagpur'; ?>" />
+<span id="city_error" class="JError"></span>
+</div>
+
+<div class="form-group">
+<label>Age</label>
+<input class="form-control" maxlength="2" name="age" id="age" value="<?php echo isset($row['age'])?$row['age']:''; ?>" style="width:50px" />
+<span id="age_error" class="JError"></span>
+</div>
+
+<div class="form-group">
+<label>Education</label>
+<input class="form-control" name="education" id="education" value="<?php echo isset($row['education'])?$row['education']:''; ?>" />
+<span id="education_error" class="JError"></span>
+</div>
+
+<div class="form-group">
+<label>IT Knowledge</label>
+<input class="form-control" name="it_knowledge" id="it_knowledge" value="<?php echo isset($row['it_knowledge'])?$row['it_knowledge']:''; ?>" />
+<span id="it_knowledge_error" class="JError"></span>
+</div>
+
+<div class="form-group">
+<label>Working</label>
+<div class="radio">
+<label><input type="radio" name="working" value="Yes" id="working1" onclick="ShowWorking('yes');" <?php if((isset($_GET['enquiry_id']) || isset($_GET['student_code'])) && $row['working']=='Yes') { echo "checked='checked'"; } ?> > Yes</label>
+</div>
+<div class="radio">
+<label><input type="radio" name="working" value="No" id="working2" onclick="ShowWorking('no');" <?php if((isset($_GET['enquiry_id']) || isset($_GET['student_code'])) && $row['working']=='No') { echo "checked='checked'"; } ?>> No</label>
+</div>
+<span id="working_error" class="JError"></span>
+</div>
+
+<div id="workingDiv" style="display:none">
+<div class="form-group">
+<label>Total Experience</label>
+<input class="form-control" name="total_exp" id="total_exp" value="<?php echo isset($row['total_exp'])?$row['total_exp']:''; ?>" />
+<span id="total_exp_error" class="JError"></span>
+</div>
+
+<div class="form-group">
+<label>Working Area</label>
+<input class="form-control" name="work_area" id="work_area" value="<?php echo isset($row['work_area'])?$row['work_area']:''; ?>" />
+<span id="work_area_error" class="JError"></span>
+</div>
+
+</div>
+
+<!-- <div class="form-group">
+<label>Enquiry Source</label>
+<input class="form-control" name="enq_source" id="enq_source" value="
+<?php 
+// echo isset($row['enq_sourse'])?$row['enq_sourse']:''; 
+?>" />
+<span id="enq_sourse_error" class="JError"></span>
+</div> -->
+
+<div class="form-group">
+    <label>Enquiry Source <span class="mandatory">*</span></label>
+    <select class="form-control" name="enq_source" id="enq_source" required onchange="toggleOtherSource()">
+        <option value="">-- Select Enquiry Source --</option>
+
+        <?php
+        $enquiry_sources = [
+            'Self-Google Search',
+            'Received a Call from Us',
+            'You received a WhatsApp from Us',
+            'Advertisement Online',
+            'Advertisement Offline',
+            'Friends Reference',
+            'College Recommended',
+            'Attended a College Seminar of Us',
+            'Instagram',
+            'Facebook',
+            'Justdial',
+            'Sulekha',
+            'Others'
+        ];
+
+        $selected_source = isset($row['enq_sourse']) ? $row['enq_sourse'] : '';
+
+        foreach ($enquiry_sources as $source) {
+            $selected = ($source == $selected_source) ? 'selected="selected"' : '';
+            echo "<option value=\"$source\" $selected>$source</option>";
+        }
+        ?>
+    </select>
+    <span id="enq_sourse_error" class="JError"></span>
+
+    <!-- Text box for "Others" option, initially hidden -->
+    <div id="other_source_div" style="display: none; margin-top: 10px;">
+        <label>Please specify:</label>
+        <input type="text" class="form-control" name="other_enq_source" id="other_enq_source" 
+               value="<?php echo ($selected_source == 'Others') ? $row['enq_sourse_details'] : ''; ?>" 
+               placeholder="Enter enquiry source" />
+    </div>
+</div>
+
+<script>
+// Function to toggle the visibility of the "Others" text box
+function toggleOtherSource() {
+    var selectBox = document.getElementById('enq_source');
+    var otherDiv = document.getElementById('other_source_div');
+    var otherInput = document.getElementById('other_enq_source');
+
+    if (selectBox.value === 'Others') {
+        otherDiv.style.display = 'block';
+        otherInput.required = true; // Make the text box required when "Others" is selected
+    } else {
+        otherDiv.style.display = 'none';
+        otherInput.required = false; // Not required if any other option is selected
+        otherInput.value = ''; // Clear the input field when not needed
+    }
+}
+
+
+const checkedFunction = () => {
+    // Select all checkboxes
+    let checkboxes = document.querySelectorAll('input[type="checkbox"]');
+    
+    checkboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', () => {
+            // Count checked checkboxes
+            let checkedCount = document.querySelectorAll('input[type="checkbox"]:checked').length;
+            document.getElementById('checkedCount').textContent = checkedCount;
+        });
+    });
+};
+
+// Call the function after the page loads
+document.addEventListener('DOMContentLoaded', checkedFunction);
+
+// Trigger the function on page load in case "Others" is already selected from previous data
+window.onload = function() {
+    toggleOtherSource();
+};
+</script>
+
+
+<div class="form-group">
+<label>Select Course </label>
+
+<?php $course = $Admin->select($Admin->franchise_courses,'',"franchise_id=".$franchise);
+foreach($course as $course1){ ?>
+<div class="checkbox">
+<label>
+<input type="checkbox" name="franchise_course_id[]" class="dataCourse" data-value="<?php echo $course1['cost']; ?>" value="<?php echo $course1['id']; ?>" >
+<?php echo $course1['course_name'];?>
+</label>
+</div>
+<?php } ?>
+<span id="course_id_error" class="JError"></span>
+</div>
+
+<h3>OR</h3>
+
+<div class="form-group">
+<label>Suggested Modules / Selected Modules <span class="mandatory">*</span></label>
+
+<?php $course = $Admin->select($Admin->courses,'',"id in($alloted_courses) ORDER BY course_name ASC");
+$courseFees = 0;
+$totaId = 0 ;
+if(isset($_GET['enquiry_id'])) {
+// echo "ksdnsjd";exit;
+$Allcourse = explode(", ",$row['course_id']);
+foreach($course as $course1){ ?>
+<div class="checkbox">
+<label>
+<input type="checkbox" name="course1[]" class="dataCourse" data-value="<?php echo $course1['amount']; ?>" value="<?php echo $course1['id']; ?>" <?php if(in_array($course1['id'],$Allcourse)) echo "checked=''"; ?> >
+<?php echo $course1['course_name']; ?> <?php if((strpos($course1['course_name'],$course1['course_code']))===false) { echo " - (".$course1['course_code'].")"; } ?> 
+</label>
+</div>
+
+<?php 
+  if(in_array($course1['id'],$Allcourse)){
+	$courseFees+=$course1['amount'];
+  } 
+
+} }else{ 
+	// echo "djsadnsjdn";
+foreach($course as $course1){
+?>
+ <div class="checkbox">
+<label>
+<input type="checkbox" name="course1[]" class="dataCourse" data-value="<?php echo $course1['amount']; ?>" value="<?php echo $course1['id']; ?>" >
+<?php 
+echo $course1['course_name'];
+?> 
+<?php 
+if((strpos($course1['course_name'],$course1['course_code']))===false) { 
+	echo " - (".$course1['course_code'].")"; 
+} 
+?> 
+</label>
+</div>
+<?php } } ?> 
+
+
+<?php $GetModules = $Admin->select($Admin->modules,'',"franchise_id=".$franchise);
+
+if(isset($_GET['enquiry_id'])) { 
+$selModules = explode(",",$row['module_id']);
+foreach($GetModules as $GetModules1) {
+?>
+<div class="checkbox">
+<label>
+<input type="checkbox" name="module1[]" value="<?php echo $GetModules1['id']; ?>" <?php if(in_array($GetModules1['id'],$selModules)){ echo "checked='checked'"; } ?> class="vlc">
+<?php 
+echo $GetModules1['modules'];
+?>
+</label>
+</div>
+<?php } }else{
+foreach($GetModules as $GetModules1) {	
+?>
+<div class="checkbox">
+<label>
+<input type="checkbox" name="module1[]" value="<?php echo $GetModules1['id']; ?>" class="vlc">
+<?php 
+echo $GetModules1['modules'];
+?>
+</label>
+</div>
+<?php } }
+?>
+<span id="course_id_error" class="JError"></span>
+</div>
+<!-- 
+<div class = "total_course_checked" style="color:blue ; margin-bottom : 1.5rem">
+<p>Total No of course you chose :  <span id="checkedCount"><0></span></p>
+</div> -->
+<div class="form-group">
+<label>Total Fees <span class="mandatory">*</span></label>
+<input type="number" min="1" class="form-control"  name="total_fees" id="fees" value="<?php echo $courseFees;?>" />
+<span id="fees_error" class="JError"></span>
+</div>
+
+<div class="form-group">
+<label>Paid Fees <span class="mandatory">*</span></label>
+<input class="form-control" name="paid_fees" id="paid" value="" oninput="calc(this.value)" onblur="calc(this.value)" />
+<span id="paid_error" class="JError"></span>
+</div>
+
+<div class="form-group">
+<label>Balance Fees</label>
+<input class="form-control" name="balance_fees" id="balance" value="" readonly />
+<span id="balance_error" class="JError"></span>
+</div>
+
+<div class="form-group">
+<label>Mode Of Payment &nbsp;&nbsp;</label>
+<label><input type="radio" name="mode_of_payment" value="Cash" checked="checked" id="cash" onClick="SwitchDiv('cash')" /> Cash</label> <label><input type="radio" id="cheque" onClick="SwitchDiv('cheque')" name="mode_of_payment" value="Cheque" /> Cheque</label> <label><input type="radio" id="online" onClick="SwitchDiv('online')" name="mode_of_payment" value="Online" /> Online</label>
+<span id="mode_of_payment_error" class="JError"></span>
+</div>
+
+<div id="chequeDiv" style="display:none">
+    <div class="form-group">
+    <label>Cheque No.</label>
+    <input class="form-control" name="cheque_no" id="cheque_no" value="" />
+    <span id="cheque_no_error" class="JError"></span>
+    </div>
+    
+    <div class="form-group">
+    <label>Drawn Bank</label>
+    <input class="form-control" name="bank_name" id="bank_name" value=""  />
+    <span id="bank_name_error" class="JError"></span>
+    </div>
+    
+    <div class="form-group">
+    <label>Cheque Amount</label>
+    <input class="form-control" name="cheque_amount" id="cheque_amount" value="" />
+    <span id="cheque_amount_error" class="JError"></span>
+    </div>
+</div>
+
+<div id="txnDiv" style="display:none">
+    <div class="form-group">
+        <label>Transaction No.</label>
+        <input class="form-control" name="txn_no" id="txn_no" value="" />
+        <span id="txn_no_error" class="JError"></span>
+	</div>
+</div>
+
+
+<div class="form-group">
+    <label>Installment Plans</label>
+    
+    <div class="input-group">
+        <input class="form-control" id="installmentNo" type="text" placeholder="Enter no. of installments">
+        <span class="form-group input-group-btn">
+            <button class="btn btn-primary" id="getInstallmentPlans" type="button">Get Plans</button>
+        </span>
+    </div>
+</div>
+
+<div class="form-group">
+    <table class="table table-striped table-bordered table-hover" >
+        <thead>
+            <tr>
+                <th width="45%">Date</th>
+                <th width="45%">Amount</th>
+                <th width="10%">Action</th>
+            </tr>
+        </thead>
+        <tbody id="instTable">
+        </tbody>
+    </table>
+    <span id="installment_error" class="JError"></span>
+</div>
+
+<div class="form-group">
+<label>Admission Date <span class="mandatory">*</span></label>
+<input class="form-control" name="admission_date" id="date" value="<?php echo date("Y-m-d"); ?>"  />
+<span id="date_error" class="JError"></span>
+</div>
+
+
+<div class="form-group">
+<label>Date of Join <span class="mandatory">*</span></label>
+<input class="form-control" name="date_of_join" id="to" value="<?php echo date("Y-m-d",strtotime("+10 days",strtotime(date("Y-m-d")))); ?>" />
+<span id="date_of_join_error" class="JError"></span>
+</div>
+
+<div class="form-group">
+<label>Next Installment Date <span class="mandatory">*</span></label>
+<input class="form-control" name="next_installment_date" id="from" value="<?php echo date("Y-m-d",strtotime("+30 days",strtotime(date("Y-m-d")))); ?>" />
+<span id="from_error" class="JError"></span>
+</div>
+
+<div class="form-group">
+<label>Payment Taken By <span class="mandatory">*</span></label>
+<input class="form-control" name="payment_taken_by" id="payment_taken_by" value="xyz" />
+<span id="payment_taken_by_error" class="JError"></span>
+</div>
+
+
+<div class="form-group">
+<label>Student Admitted By </label>
+<?php if(isset($_GET['enquiry_id'])) { ?>
+<select class="form-control" name="franchise_staff_id" >
+<?php $counsellor = $Admin->select($Admin->franchise_staffs,'',"id=".$row['franchise_staff_id']."");
+foreach($counsellor as $counsellor1) { ?>
+<option value="<?php echo $counsellor1['id']; ?>"> <?php echo $counsellor1['staff_name']; ?> </option>
+<?php } ?>
+</select>
+<?php }else{ ?>
+<select class="form-control" name="franchise_staff_id" >
+<option value=""> -- Select Counsellor -- </option>
+<?php $counsellor = $Admin->select($Admin->franchise_staffs,'',"franchise_id=".$franchise." AND staff_designation='Counsellor' and status ='A' ORDER BY staff_name ASC");
+foreach($counsellor as $counsellor1) { ?>
+<option value="<?php echo $counsellor1['id']; ?>" <?php if($counsellor1['id'] == $_SESSION['auth']['id']): ?> selected="selected" <?php endif; ?> > <?php echo $counsellor1['staff_name']; ?> </option>
+<?php } ?>
+</select>
+<?php } ?>
+</div>
+
+
+<?php if(isset($_GET['student_code'])) { ?>
+<input type="submit" class="btn btn-primary" value="SUBMIT" name="add_old" >
+<?php } else { ?>
+<input type="submit" class="btn btn-primary" value="SUBMIT" name="add" >
+<?php } ?>
+</form>
+</div>
+</div>
+
+
+</div>  
+</div>   
+<!-- /. ROW  -->           
+</div>
+<!-- /. PAGE INNER  -->
+</div>
+<!-- /. PAGE WRAPPER  -->
+</div>
+<!-- /. WRAPPER  -->
+
+</body>
+</html>
